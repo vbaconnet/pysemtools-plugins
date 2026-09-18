@@ -1,18 +1,6 @@
-from os import path
-
-import adios2.bindings as adios2
-from pysemtools.io.adios2.stream import DataStreamer
-from pysemtools.io.utils import get_fld_from_ndarray
-from pysemtools.datatypes.msh import Mesh
-from pysemtools.datatypes.field import NoOverwriteDict
-from pysemtools.monitoring.logger import Logger
-from pysemtools.interpolation.pointclouds import generate_1d_arrays as pcs_generate_1d_arrays
 from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 import numpy as np
-
-# Alias for compatibility with existing code
-pcs = type('module', (), {'generate_1d_arrays': pcs_generate_1d_arrays})()
 
 
 def compute_normal_tangent(xa,xb,ya,yb):
