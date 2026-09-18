@@ -16,7 +16,6 @@ dependencies = [
     "numpy",
     "scipy",
     "h5py",
-    "adios2",
 ]
 
 [project.optional-dependencies]
