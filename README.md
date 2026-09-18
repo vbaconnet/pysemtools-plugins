@@ -1,6 +1,6 @@
 # pySEMTools-plugins
 
-Plugin modules for [pySEMTools](https://github.com/ICCS-FDS/pySEMTools), extending its functionality for stream processing and interpolation.
+Plugin modules for [pySEMTools](https://github.com/ExtremeFLOW/pySEMTools), extending its functionality for stream processing and interpolation.
 
 ## Modules
 
