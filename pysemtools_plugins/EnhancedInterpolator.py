@@ -2,7 +2,7 @@ from pysemtools.interpolation import Probes
 from pysemtools.datatypes.field import NoOverwriteDict
 from pysemtools.io.ppymech.neksuite import read_nekheader
 from pysemtools.datatypes.msh import Mesh
-from InterpolatorCache import InterpolatorCache
+from pysemtools_plugins.InterpolatorCache import InterpolatorCache
 import numpy as np
 import pickle
 

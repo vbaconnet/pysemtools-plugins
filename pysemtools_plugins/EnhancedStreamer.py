@@ -4,7 +4,7 @@ from pysemtools.io.utils import get_fld_from_ndarray
 from pysemtools.datatypes.msh import Mesh
 from pysemtools.datatypes.field import NoOverwriteDict
 from pysemtools.monitoring.logger import Logger
-from EnhancedInterpolator import EnhancedInterpolator
+from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 import numpy as np
 
 class EnhancedStreamer:
