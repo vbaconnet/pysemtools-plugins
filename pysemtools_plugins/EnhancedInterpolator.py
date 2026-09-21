@@ -6,10 +6,144 @@ from pysemtools_plugins.InterpolatorCache import InterpolatorCache
 import numpy as np
 import pickle
 
+def gen_xyz_3d(x: np.ndarray, y: np.ndarray, z: np.ndarray):
+    return np.column_stack((
+                        x.ravel(),
+                        y.ravel(),
+                        z.ravel()
+                    ))
+
+def gen_xyz_2d(
+        x: np.ndarray | float,
+        y: np.ndarray | float,
+        z: np.ndarray | float
+        ):
+
+    x_1d = isinstance(x, float)
+    y_1d = isinstance(y, float)
+    z_1d = isinstance(z, float)
+
+    # Make sure that only one argument is float, the other ones must be arrays
+    is_valid = ( 
+        x_1d and not y_1d and not z_1d
+        ) or (
+        y_1d and not x_1d and not z_1d
+        ) or (
+        z_1d and not y_1d and not x_1d
+        )
+    
+    if not is_valid:
+        raise ValueError("Only one argument must be float, the other two must be arrays!")
+    
+    if x_1d:
+        return np.column_stack(
+            (
+                x * np.ones_like(y.ravel()),
+                y.ravel(),
+                z.ravel()
+                )
+            )
+    elif y_1d:
+        return np.column_stack(
+            (
+                x.ravel(), 
+                y * np.ones_like(x.ravel()), 
+                z.ravel()
+                )
+            ) 
+    elif z_1d:
+        return np.column_stack(
+            (
+                x.ravel(),
+                y.ravel(),
+                z * np.ones_like(x.ravel())
+                )
+            )
+
+
+def gen_xyz_1d(
+        x: np.ndarray | float,
+        y: np.ndarray | float,
+        z: np.ndarray | float
+        ):
+    """
+    Generate 3D coordinates from 1D input where two arguments are floats and one is ndarray.
+    
+    This extrudes a 1D line into 3D space by repeating the float values.
+    
+    Parameters
+    ----------
+    x : np.ndarray or float
+        X-coordinates (array) or constant x-value (float)
+    y : np.ndarray or float
+        Y-coordinates (array) or constant y-value (float)
+    z : np.ndarray or float
+        Z-coordinates (array) or constant z-value (float)
+        
+    Returns
+    -------
+    np.ndarray
+        3D coordinate array of shape (N, 3) where N is the length of the array argument
+        
+    Raises
+    ------
+    ValueError
+        If not exactly two arguments are floats and one is an ndarray
+    """
+    x_arr = isinstance(x, np.ndarray)
+    y_arr = isinstance(y, np.ndarray)
+    z_arr = isinstance(z, np.ndarray)
+
+    # Make sure that exactly two arguments are floats and one is an ndarray
+    is_valid = ( 
+        x_arr and not y_arr and not z_arr
+        ) or (
+        y_arr and not x_arr and not z_arr
+        ) or (
+        z_arr and not x_arr and not y_arr
+        )
+    
+    if not is_valid:
+        raise ValueError("Exactly two arguments must be floats and one must be an ndarray!")
+    
+    if x_arr:
+        return np.column_stack(
+            (
+                x.ravel(),
+                y * np.ones_like(x.ravel()),
+                z * np.ones_like(x.ravel())
+                )
+            )
+    elif y_arr:
+        return np.column_stack(
+            (
+                x * np.ones_like(y.ravel()),
+                y.ravel(),
+                z * np.ones_like(y.ravel())
+                )
+            ) 
+    elif z_arr:
+        return np.column_stack(
+            (
+                x * np.ones_like(z.ravel()),
+                y * np.ones_like(z.ravel()),
+                z.ravel()
+                )
+            )
+
+
 class EnhancedInterpolator:
 
-    def __init__(self, x, y, z = None, fill_extrude_value = None, 
-                 cache_dir = "", cache_key = None, force_recompute = False, **kwargs):
+    def __init__(
+            self, 
+            x: np.ndarray | float,
+            y: np.ndarray | float,
+            z: np.ndarray | float, 
+            cache_dir = "",
+            cache_key = None,
+            force_recompute = False,
+            **kwargs
+            ):
         """
         Initialize the EnhancedInterpolator with given coordinates and optional parameters.
 
