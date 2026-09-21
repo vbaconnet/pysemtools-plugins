@@ -105,8 +105,9 @@ class EnhancedStreamer:
                 self.ds.recieve(),
                 self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
                 ).astype(dt) 
+            
             if f in self.fields:
-                self.fields[f][...] = ftemp
+                self.fields[f][...] = ftemp #noverwritedict requires this way of overwriting
             else:
                 self.fields[f] = ftemp
                 
@@ -115,14 +116,14 @@ class EnhancedStreamer:
         self.log.write("info", "Data received")
 
     def add_interpolator_from_object(self, i: EnhancedInterpolator,
-                                     name: str = None):
+                                     name: str = ""):
         """
         Add an interpolator object to the StreamProcessor.
 
         :param i: EnhancedInterpolator object to add
         :param name: Name of the interpolator. If None, a default name is generated.
         """
-        if name is None:
+        if not name:
             name_ = f"interpolator_{str(len(self.interpolators.keys()))}"
         else:
             name_ = name
@@ -167,20 +168,49 @@ class EnhancedStreamer:
             comm = self.comm,
             **kwargs)
 
+    def update_interpolator(self, t: float, interpolator_name: str, field_names: list[str] = []):
+        """
+        Update a specific interpolator with new data.
+
+        :param interpolator_name: Name of the interpolator to update
+        :param field_names: List of field names to use for interpolation
+        :param t: Time value for the interpolation
+        """
+        assert isinstance(field_names, list)
+
+        self.log.write("info", f"Updating interpolator {interpolator_name}")
+
+        if not field_names:
+            self.log.write("info", "Updating all fields")
+
+            self.interpolators[interpolator_name].interpolate_from_field_list(
+                    t,
+                    field_list = list(self.fields.values()),
+                    field_names = list(self.fields.keys()),
+                    comm = self.comm,
+                    write_data = False
+                    )
+        else:
+
+            if not isinstance(field_names, list):
+                raise ValueError("field_names must be a list!")
+            
+            self.log.write("info", f"Updating fields {field_names}")
+
+            self.interpolators[interpolator_name].interpolate_from_field_list(
+                    t,
+                    field_list = [self.fields[f] for f in field_names],
+                    field_names = field_names,
+                    comm = self.comm,
+                    write_data = False
+                    )
+
     def update_interpolators(self, t: float = 0.0):
         """
         Update interpolators when new data has been received
         """
-
-        for iname, i in self.interpolators.items():
-            self.log.write("info", f"Updating interpolator {iname}...")
-            i.interpolate_from_field_list(
-                t,
-                field_list = list(self.fields.values()),
-                field_names = self.field_names,
-                comm = self.comm,
-                write_data = False
-                )
+        for iname in self.interpolators.keys():
+            self.update_interpolator(t, iname)
 
     def get_field_from_interpolator(self, field_name, interpolator_name):
         return self.interpolators[interpolator_name].get_field(field_name)

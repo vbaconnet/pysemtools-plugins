@@ -4,6 +4,7 @@
 import sys
 import os
 import argparse
+from time import sleep
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -39,7 +40,7 @@ import matplotlib.colors as colors
 import adios2.bindings as adios2
 
 # my classes
-from FlatPlateStreamProcessor import FlatPlateStreamProcessor
+from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 
 # pysemtools
 from pysemtools.io.adios2.stream import DataStreamer
@@ -71,12 +72,16 @@ def get_field_names(fname):
     raise ValueError("No data_streamer component found")
 
 def init_plot(save_output_path):
-    fig, axs = plt.subplots(nrows = 3, figsize = (10,12), sharex = True)
+    fig, axs = plt.subplots(nrows = 3, figsize = (10,12), sharex = False)
 
-    axs[-1].set_xlabel("x")
-    for ax in axs:
-        ax.set_aspect('equal')
-        ax.set_ylabel("y")
+    axs[0].set_xlabel("x")
+    axs[0].set_ylabel("y")
+    axs[0].set_aspect('equal')
+    axs[1].set_xlabel("x")
+    axs[1].set_ylabel("y")
+    axs[1].set_aspect('equal')
+    axs[-1].set_xlabel("angle [deg]")
+    axs[-1].set_ylabel("tau_x")
     
     # Set colorbar for x-velocity
     norm = colors.Normalize(vmin=-0.4, vmax=1.4)
@@ -89,12 +94,6 @@ def init_plot(save_output_path):
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='bwr'),
                         ax = axs[1])
     cbar.set_label("z-vorticity")
-
-    # Set colorbar for averaged x-velocity
-    norm = colors.Normalize(vmin=-0.2, vmax=1.0)
-    cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'),
-                         ax = axs[2])
-    cbar.set_label("avg. x-velocity")
 
     fig.suptitle("Waiting to receive data from neko...")
     fname = join(save_output_path, "cylinder_insitu_00000.png")
@@ -114,8 +113,13 @@ parser.add_argument("--timeout", type=int, default=300,
 args = parser.parse_args()
 
 if args.dry_run:
-    log.write("info", "Dry run: all imports succeeded. Exiting before actions.")
+    log.write("info", "Dry run: all imports succeeded. Exiting.")
     sys.exit(0)
+
+# Remove globalArray_* files
+import subprocess
+subprocess.run(["rm", "-f", "globalArray*"])
+sleep(1.0)
 
 #=========================================
 # Define some variables/parameters
@@ -139,7 +143,7 @@ log.write("info", f"Outputting insitu snapshots to folder {output_path}")
 
 streamer_field_names = get_field_names("cylinder_insitu.case")
 
-processor = FlatPlateStreamProcessor(
+processor = EnhancedStreamer(
     comm,
     fields = streamer_field_names,
     adios2_timeout = args.timeout
@@ -170,7 +174,17 @@ processor.add_interpolator_from_values(
     x = X,
     y = Y,
     fill_extrude_value = 2.0,
-    cache_dir = "./interpolator_cache",
+    write_coords = False
+    )
+
+# Generate a line with 100 points along the circle of center (0,0) and radius
+# R = 0.5
+theta = np.linspace(0.0, np.pi, 100)
+processor.add_interpolator_from_values(
+    name = "circle",
+    x = np.cos(theta + np.pi) * 0.5,
+    y = np.sin(theta + np.pi) * 0.5,
+    fill_extrude_value = 2.0,
     write_coords = False
     )
 
@@ -195,21 +209,35 @@ while True:
         break
 
     # Interpolate and reshape into a structured grid for plotting
-    processor.update_interpolators(j)
+    processor.update_interpolator(
+        j, 
+        "plane", 
+        streamer_field_names[:2]
+        )
+    
+    processor.update_interpolator(
+        j, 
+        "circle", 
+        streamer_field_names[-1:])
 
     if comm.Get_rank() == 0:
+
         u_probe = processor.get_field_from_interpolator(
             streamer_field_names[0], "plane")
         curl_probe = processor.get_field_from_interpolator(
             streamer_field_names[1], "plane")
-        avg_probe = processor.get_field_from_interpolator(
-            streamer_field_names[2], "plane")
+        
+        pressure_probe = processor.get_field_from_interpolator(
+            streamer_field_names[2], "circle")
 
         fig.suptitle(f"time step {j}")
         log.write("info", "Plotting fields")
-        axs[0].contourf(X, Y, u_probe, levels = 40, norm=colors.Normalize(vmin=-0.4, vmax=1.4))
-        axs[1].contourf(X, Y, curl_probe, levels = 40, cmap = "bwr", norm=colors.Normalize(vmin=-4.0, vmax=4.0))
-        axs[2].contourf(X, Y, avg_probe, levels = 40, norm=colors.Normalize(vmin=-0.2, vmax=1.0))
+        #axs[0].cla()
+        axs[0].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, u_probe, levels = 40, norm=colors.Normalize(vmin=-0.4, vmax=1.4))
+        #axs[1].cla()
+        axs[1].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, curl_probe, levels = 40, cmap = "bwr", norm=colors.Normalize(vmin=-4.0, vmax=4.0))
+        #axs[2].cla()
+        axs[2].plot(theta * 180 / np.pi, pressure_probe)
         if j == 0: 
             fig.tight_layout()
 

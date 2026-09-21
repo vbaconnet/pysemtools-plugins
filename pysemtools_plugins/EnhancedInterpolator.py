@@ -9,7 +9,7 @@ import pickle
 class EnhancedInterpolator:
 
     def __init__(self, x, y, z = None, fill_extrude_value = None, 
-                 cache_dir = "./ei_cache", cache_key = None, force_recompute = False, **kwargs):
+                 cache_dir = "", cache_key = None, force_recompute = False, **kwargs):
         """
         Initialize the EnhancedInterpolator with given coordinates and optional parameters.
 

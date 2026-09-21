@@ -87,6 +87,15 @@
                 "compute_control": "fluid_output"
             },
             {
+                "type": "wall_shear_stress",
+                "name": "wss",
+                "zone_indices": [7],
+                "computed_field": "tau",
+                "components": ["x", "y"],
+                "compute_control": "tsteps",
+                "compute_value": 10
+            },
+            {
                 "comment": "Stored in scalar 1,2,3. Changes order if simcomp is added before lambda2",
                 "type": "curl",
                 "fields": [ "u", "v", "w" ],
@@ -113,7 +122,7 @@
             },
             {
                 "type": "data_streamer", 
-                "fields": ["u", "curl_z", "fluid_stats/mean_u"],
+                "fields": ["u", "curl_z", "tau_x"],
                 "stream_mesh": true,
                 "compute_control": "tsteps",
                 "compute_value": "strm_update_freq"
