@@ -161,21 +161,33 @@ processor.receive_mesh(dtype_string)
 
 # Generate a 30x30 grid in the x-y plane at a given z.
 N = 30
-xbounds = [0.6, 4.0]
-ybounds = [-1.0, 1.0]
-z = 2.0
-x = np.linspace(xbounds[0], xbounds[1], N)
-y = np.linspace(ybounds[0], ybounds[1], N)
-X, Y = np.meshgrid(x,y)
-del x,y
+# xbounds = [0.6, 4.0]
+# ybounds = [-1.0, 1.0]
+# z = 2.0
+# x = np.linspace(xbounds[0], xbounds[1], N)
+# y = np.linspace(ybounds[0], ybounds[1], N)
+# X, Y = np.meshgrid(x,y)
+# del x,y
 
-processor.add_interpolator_from_values(
+# processor.add_interpolator_from_values(
+#     name = "plane",
+#     x = X,
+#     y = Y,
+#     fill_extrude_value = 2.0,
+#     write_coords = False
+#     )
+
+processor.add_2d_grid_interpolation(
     name = "plane",
-    x = X,
-    y = Y,
-    fill_extrude_value = 2.0,
-    write_coords = False
-    )
+    x_bounds=[0.6, 4.0],
+    y_bounds=[-1.0, 1.0],
+    z_bounds = 2.0,
+    Nx = N, 
+    Ny = N, 
+    write_coords = False)
+
+X = processor.interpolators["plane"].x
+Y = processor.interpolators["plane"].y
 
 # Generate a line with 100 points along the circle of center (0,0) and radius
 # R = 0.5
@@ -184,7 +196,7 @@ processor.add_interpolator_from_values(
     name = "circle",
     x = np.cos(theta + np.pi) * 0.5,
     y = np.sin(theta + np.pi) * 0.5,
-    fill_extrude_value = 2.0,
+    z = 2.0,
     write_coords = False
     )
 
