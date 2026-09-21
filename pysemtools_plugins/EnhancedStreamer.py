@@ -131,7 +131,7 @@ class EnhancedStreamer:
         self.log.write("info", f"Adding interpolator {name_} to the StreamProcessor")
         self.interpolators[name_] = i
 
-    def add_interpolator_from_values(self, name, **kwargs):
+    def add_interpolator_from_values(self, name, x, y, z, **kwargs):
         """
         Add an interpolator to the StreamProcessor using provided values.
 
@@ -164,6 +164,9 @@ class EnhancedStreamer:
             raise ValueError(f"Error: {e}")
 
         self.interpolators[name] = EnhancedInterpolator(
+            x = x,
+            y = y,
+            z = z, 
             msh = self.msh,
             comm = self.comm,
             **kwargs)
@@ -215,3 +218,60 @@ class EnhancedStreamer:
     def get_field_from_interpolator(self, field_name, interpolator_name):
         return self.interpolators[interpolator_name].get_field(field_name)
 
+
+    def add_2d_grid_interpolation(
+            self,
+            name: str,
+            x_bounds: list[float] | float,
+            y_bounds: list[float] | float,
+            z_bounds: list[float] | float,
+            Nx: int = 100,
+            Ny: int = 100,
+            Nz: int = 100,
+            **kwargs
+            ):
+        """
+        Add an 2D grid interpolator. One of x,y,z must be a float.
+        Parameters
+        ----------
+        name : str
+            Name of the interpolator.
+        x_bounds : list[float] | float
+            Bounds for the x-axis. If a single float is provided, is used as the "filler" value.
+        y_bounds : list[float] | float
+            Bounds for the y-axis. If a single float is provided, is used as the "filler" value.
+        z_bounds : list[float] | float
+            Bounds for the z-axis. If a single float is provided, is used as the "filler" value.
+        Nx : int, optional
+            Number of points along the x-axis (default is 100).
+        Ny : int, optional
+            Number of points along the y-axis (default is 100).
+        Nz : int, optional
+            Number of points along the z-axis (default is 100).
+        """
+
+        if isinstance(x_bounds, float):
+            y = np.linspace(y_bounds[0], y_bounds[1], Ny)
+            z = np.linspace(z_bounds[0], z_bounds[1], Nz)
+            y, z = np.meshgrid(y, z)
+            x = x_bounds
+        elif isinstance(y_bounds, float):
+            x = np.linspace(x_bounds[0], x_bounds[1], Nx)
+            z = np.linspace(z_bounds[0], z_bounds[1], Nz)
+            x, z = np.meshgrid(x, z)
+            y = y_bounds
+        elif isinstance(z_bounds, float):
+            x = np.linspace(x_bounds[0], x_bounds[1], Nx)
+            y = np.linspace(y_bounds[0], y_bounds[1], Ny) 
+            x, y = np.meshgrid(x, y)
+            z = z_bounds
+        else:
+            raise ValueError("Invalid bounds provided for interpolation")
+
+        self.add_interpolator_from_values(
+            name = name,
+            x = x,
+            y = y,
+            z = z,
+            **kwargs
+        )

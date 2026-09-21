@@ -169,22 +169,30 @@ class EnhancedInterpolator:
             Must include 'comm' (MPI communicator) and 'msh' (mesh).
         """
         
-        # Validate inputs
-        assert x.shape == y.shape
-
-        if z is not None: 
-            assert x.shape == z.shape
-        else:
-            if fill_extrude_value is None:
-                raise ValueError("Please provide a fill_extrude_value if z is not provided.")
-            else:
-                self.fill_extrude_value = fill_extrude_value
-
         self.x = x
         self.y = y 
         self.z = z
 
-        self.orig_shape = self.x.shape
+        self.is_3D = isinstance(x, np.ndarray) and \
+                     isinstance(y, np.ndarray) and \
+                     isinstance(z, np.ndarray)
+
+        x_1d = isinstance(x, float); y_1d = isinstance(y, float); 
+        z_1d = isinstance(z, float)
+        self.is_2D = (
+            x_1d and not y_1d and not z_1d
+            ) or (
+            y_1d and not x_1d and not z_1d
+            ) or (
+            z_1d and not y_1d and not x_1d
+            )
+
+        self.is_1D = not self.is_3D and not self.is_2D
+        
+        self.orig_shape = next((arr.shape for arr in [self.x, self.y, self.z]
+                                      if isinstance(arr, np.ndarray)), None)
+        if not isinstance(self.orig_shape, tuple):
+            raise TypeError("Problem loading shape of x/y/z")
 
         self.interpolated_fields = NoOverwriteDict()
 
@@ -217,19 +225,14 @@ class EnhancedInterpolator:
         # Normal initialization (no cache or cache load failed)
         if self.comm.Get_rank() == 0:
 
-            if z is None:
-                xyz = np.column_stack((
-                    x.ravel(),
-                    y.ravel(),
-                    fill_extrude_value * np.ones_like(x.ravel())
-                ))
-            
+            if self.is_3D:
+                xyz = gen_xyz_3d(x, y, z)
+            elif self.is_2D:
+                xyz = gen_xyz_2d(x, y, z)
+            elif self.is_1D:
+                xyz = gen_xyz_1d(x, y, z)
             else:
-                xyz = np.column_stack((
-                    x.ravel(),
-                    y.ravel(),
-                    z.ravel()
-                ))
+                raise ValueError("Problem initializing xyz array for probes")
 
         else:
             xyz = None
