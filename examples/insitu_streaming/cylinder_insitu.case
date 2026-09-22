@@ -1,7 +1,7 @@
 {
     "version": 1.0,
     "case": {
-        "mesh_file": "cylinder.nmsh",
+        "mesh_file": "n3.nmsh",
         "output_at_end": true,
         "output_boundary": true,
         "output_checkpoints": false,
@@ -9,15 +9,15 @@
         "checkpoint_control": "simulationtime",
         "checkpoint_value": 50.0,
         "time": {
-            "end_time": 100.0,
+            "end_time": 1.0,
             "variable_timestep": true,
             "target_cfl": 0.5,
             "max_timestep": 1e-1
         },
         "numerics": {
             "time_order": 3,
-            "polynomial_order": 5,
-            "dealias": true
+            "polynomial_order": 3,
+            "dealias": false
         },
         "fluid": {
             "scheme": "pnpn",
@@ -32,17 +32,17 @@
                     "type": "jacobi"
                 },
                 "projection_space_size": 0,
-                "absolute_tolerance": 1e-7,
-                "max_iterations": 800
+                "absolute_tolerance": 1e-5,
+                "max_iterations": 50
             },
             "pressure_solver": {
                 "type": "gmres",
                 "preconditioner": {
-                    "type": "hsmg"
+                    "type": "phmg"
                 },
                 "projection_space_size": 0,
                 "absolute_tolerance": 1e-3,
-                "max_iterations": 800
+                "max_iterations": 50
             },
             "boundary_conditions": [
                 {
@@ -52,21 +52,16 @@
                 },
                 {
                     "type": "outflow+dong",
-                    "zone_indices": [ 2 ]
+                    "zone_indices": [ 4 ]
                 },
                 {
                     "type": "normal_outflow",
                     "value": [1.0, 0.0, 0.0],
-                    "zone_indices": [ 5 ]
-                },
-                {
-                    "type": "normal_outflow",
-                    "value": [1.0, 0.0, 0.0],
-                    "zone_indices": [ 6 ]
+                    "zone_indices": [ 3 ]
                 },
                 {
                     "type": "no_slip",
-                    "zone_indices": [ 7 ]
+                    "zone_indices": [ 2 ]
                 }
             ],
             "output_control": "simulationtime",
@@ -76,7 +71,7 @@
         [
           {
             "name": "strm_update_freq",
-            "value": 50
+            "value": 1
           } 
         ],
         "simulation_components":
@@ -89,9 +84,9 @@
             {
                 "type": "wall_shear_stress",
                 "name": "wss",
-                "zone_indices": [7],
+                "zone_indices": [2],
                 "computed_field": "tau",
-                "components": ["x", "y"],
+                "components": ["x"],
                 "compute_control": "tsteps",
                 "compute_value": 10
             },
@@ -103,26 +98,8 @@
                 "compute_value": "strm_update_freq"
             },
             {
-                "type": "force_torque",
-                "compute_control": "tsteps",
-                "compute_value": 10,
-                "zone_id": 7,
-                "zone_name": "Cylinder",
-                "center": [ 0.0, 0.0, 0.0 ]
-            },
-            {
-                "type": "fluid_stats",
-                "output_control": "never",
-                "output_value": 10.0,
-                "start_time": 20.0,
-                "compute_control": "tsteps",
-                "compute_value": "strm_update_freq",
-                "avg_direction": "z",
-                "set_of_stats": "basic"
-            },
-            {
                 "type": "data_streamer", 
-                "fields": ["u", "curl_z", "tau_x"],
+                "fields": ["u", "tau_x"],
                 "stream_mesh": true,
                 "compute_control": "tsteps",
                 "compute_value": "strm_update_freq"
