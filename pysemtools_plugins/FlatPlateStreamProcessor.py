@@ -1,7 +1,7 @@
 from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 import numpy as np
-
+from pysemtools.interpolation.pointclouds import generate_1d_arrays
 
 def compute_normal_tangent(xa,xb,ya,yb):
     """
@@ -150,7 +150,14 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
         )
         # ---
 
-    def generate_BL_plane(self, xmin, xmax, Nx=1000, Ly = 0.1, Ny = 1000, g = 2):
+    def generate_BL_plane(
+            self,
+            xmin,
+            xmax,
+            Nx=1000,
+            Ly = 0.1,
+            Ny = 1000,
+            g = 2):
         """
         Generate an interpolator object with points normal to the blade.
 
@@ -204,7 +211,7 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
 
                 # Now generate a line with length L
                 s_bbox = [L, 0.0] # yes it is reverted, because we're doing a half tanh
-                s = pcs.generate_1d_arrays(s_bbox, Npts, mode="half_tanh", gain=g)
+                s = generate_1d_arrays(s_bbox, Npts, mode="half_tanh", gain=g)
                 s = np.flip(s) # flip the distribution
                 xline = xstart + s*n[0]
                 yline = ystart + s*n[1]
@@ -218,9 +225,9 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
         probes = EnhancedInterpolator(
             x = x_pts, 
             y = y_pts,
-            fill_extrude_value=0.0,
+            z = 0.0,
             comm = self.comm, 
-            msh = self.mesh, 
+            msh = self.msh, 
             point_interpolator_type='multiple_point_legendre_numpy',
             max_pts=256, 
             find_points_comm_pattern='point_to_point',

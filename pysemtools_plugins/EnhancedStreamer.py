@@ -131,7 +131,7 @@ class EnhancedStreamer:
         self.log.write("info", f"Adding interpolator {name_} to the StreamProcessor")
         self.interpolators[name_] = i
 
-    def add_interpolator_from_values(self, name, x, y, z, **kwargs):
+    def add_interpolator_from_values(self, name, **kwargs):
         """
         Add an interpolator to the StreamProcessor using provided values.
 
@@ -164,14 +164,16 @@ class EnhancedStreamer:
             raise ValueError(f"Error: {e}")
 
         self.interpolators[name] = EnhancedInterpolator(
-            x = x,
-            y = y,
-            z = z, 
             msh = self.msh,
             comm = self.comm,
             **kwargs)
 
-    def update_interpolator(self, t: float, interpolator_name: str, field_names: list[str] = []):
+    def update_interpolator(
+            self, 
+            t: float, 
+            interpolator_name: str, 
+            field_names: list[str] = [],
+            **kwargs):
         """
         Update a specific interpolator with new data.
 
@@ -191,7 +193,7 @@ class EnhancedStreamer:
                     field_list = list(self.fields.values()),
                     field_names = list(self.fields.keys()),
                     comm = self.comm,
-                    write_data = False
+                    **kwargs
                     )
         else:
 
@@ -205,7 +207,7 @@ class EnhancedStreamer:
                     field_list = [self.fields[f] for f in field_names],
                     field_names = field_names,
                     comm = self.comm,
-                    write_data = False
+                    **kwargs
                     )
 
     def update_interpolators(self, t: float = 0.0):
@@ -217,7 +219,6 @@ class EnhancedStreamer:
 
     def get_field_from_interpolator(self, field_name, interpolator_name):
         return self.interpolators[interpolator_name].get_field(field_name)
-
 
     def add_2d_grid_interpolation(
             self,
@@ -231,7 +232,7 @@ class EnhancedStreamer:
             **kwargs
             ):
         """
-        Add an 2D grid interpolator. One of x,y,z must be a float.
+        Add an 2D rectilinear grid interpolator. One of x,y,z must be a float.
         Parameters
         ----------
         name : str

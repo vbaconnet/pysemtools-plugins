@@ -72,14 +72,14 @@ def get_field_names(fname):
     raise ValueError("No data_streamer component found")
 
 def init_plot(save_output_path):
-    fig, axs = plt.subplots(nrows = 3, figsize = (10,12), sharex = False)
+    fig, axs = plt.subplots(nrows = 3, figsize = (15,12), sharex = False)
 
     axs[0].set_xlabel("x")
     axs[0].set_ylabel("y")
     axs[0].set_aspect('equal')
-    axs[1].set_xlabel("x")
-    axs[1].set_ylabel("y")
-    axs[1].set_aspect('equal')
+    axs[1].set_xlabel("t")
+    axs[1].set_ylabel("u")
+    axs[1].set_aspect('auto')
     axs[-1].set_xlabel("angle [deg]")
     axs[-1].set_ylabel("tau_x")
     
@@ -88,12 +88,6 @@ def init_plot(save_output_path):
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'),
                          ax = axs[0])
     cbar.set_label("x-velocity")
-    
-    # Set colorbar for z-vorticity
-    norm = colors.Normalize(vmin=-4.0, vmax=4.0)
-    cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='bwr'),
-                        ax = axs[1])
-    cbar.set_label("z-vorticity")
 
     fig.suptitle("Waiting to receive data from neko...")
     fname = join(save_output_path, "cylinder_insitu_00000.png")
@@ -200,6 +194,16 @@ processor.add_interpolator_from_values(
     write_coords = False
     )
 
+# --------------------------------------------
+# Read from csv
+processor.add_interpolator_from_values(
+    name = "probes",
+    fname = "probes.csv",
+    x = 0.0,
+    y = 0.0,
+    z = 0.0
+)
+
 #=========================================
 # Initialize plots
 #=========================================
@@ -220,17 +224,7 @@ while True:
     if not processor.get_adios2_status():
         break
 
-    # Interpolate and reshape into a structured grid for plotting
-    processor.update_interpolator(
-        j, 
-        "plane", 
-        streamer_field_names[:2]
-        )
-    
-    processor.update_interpolator(
-        j, 
-        "circle", 
-        streamer_field_names[-1:])
+    processor.update_interpolators(j)
 
     if comm.Get_rank() == 0:
 
@@ -242,18 +236,43 @@ while True:
         pressure_probe = processor.get_field_from_interpolator(
             streamer_field_names[2], "circle")
 
+        u_pbs = processor.get_field_from_interpolator(
+            streamer_field_names[0], "probes"
+        )
+
+        print(u_pbs.shape, u_probe.shape)
+
         fig.suptitle(f"time step {j}")
         log.write("info", "Plotting fields")
         #axs[0].cla()
         axs[0].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, u_probe, levels = 40, norm=colors.Normalize(vmin=-0.4, vmax=1.4))
         #axs[1].cla()
-        axs[1].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, curl_probe, levels = 40, cmap = "bwr", norm=colors.Normalize(vmin=-4.0, vmax=4.0))
-        #axs[2].cla()
+        #axs[1].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, curl_probe, levels = 40, cmap = "bwr", norm=colors.Normalize(vmin=-4.0, vmax=4.0))
+        
+        if j == 0:
+            line0, = axs[1].plot([], [], "r-", label="probe 0")
+            line1, = axs[1].plot([], [], "g-", label="probe 1")
+            line2, = axs[1].plot([], [], "b-", label="probe 2")
+            axs[1].legend()
+        else:
+            # Append to each line's data
+            x = np.append(line0.get_xdata(), j)
+            line0.set_data(x, np.append(line0.get_ydata(), u_pbs[0]))
+            line1.set_data(x, np.append(line1.get_ydata(), u_pbs[1]))
+            line2.set_data(x, np.append(line2.get_ydata(), u_pbs[2]))
+
+            # Auto-rescale the view
+            axs[1].relim()
+            axs[1].autoscale_view()
+
+        axs[2].clear()
         axs[2].plot(theta * 180 / np.pi, pressure_probe)
         if j == 0: 
             fig.tight_layout()
 
         fname = join(output_path, f"cylinder_insitu_{j:05d}.png")
+        subprocess.run(["ln", "-fs", fname, "current.png"])
+        #fname = join(output_path, "cylinder_insitu_00000.png")
         log.write("info", f"Saving snapshot to {fname}")
         fig.savefig(fname, dpi = 200)
 

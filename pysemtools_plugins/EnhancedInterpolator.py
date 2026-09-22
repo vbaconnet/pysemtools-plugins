@@ -142,6 +142,7 @@ class EnhancedInterpolator:
             cache_dir = "",
             cache_key = None,
             force_recompute = False,
+            fname: str = "",
             **kwargs
             ):
         """
@@ -168,74 +169,79 @@ class EnhancedInterpolator:
             Additional keyword arguments to pass to the Probes constructor.
             Must include 'comm' (MPI communicator) and 'msh' (mesh).
         """
-        
-        self.x = x
-        self.y = y 
-        self.z = z
 
-        self.is_3D = isinstance(x, np.ndarray) and \
-                     isinstance(y, np.ndarray) and \
-                     isinstance(z, np.ndarray)
-
-        x_1d = isinstance(x, float); y_1d = isinstance(y, float); 
-        z_1d = isinstance(z, float)
-        self.is_2D = (
-            x_1d and not y_1d and not z_1d
-            ) or (
-            y_1d and not x_1d and not z_1d
-            ) or (
-            z_1d and not y_1d and not x_1d
-            )
-
-        self.is_1D = not self.is_3D and not self.is_2D
-        
-        self.orig_shape = next((arr.shape for arr in [self.x, self.y, self.z]
-                                      if isinstance(arr, np.ndarray)), None)
-        if not isinstance(self.orig_shape, tuple):
-            raise TypeError("Problem loading shape of x/y/z")
-
-        self.interpolated_fields = NoOverwriteDict()
+        # Must be specified, will throw a KeyError if not provided
+        # comm is not added as an explicit optional argument since it is already 
+        # a required argument for the Probes class, and we want to avoid redundancy.
+        self.comm = kwargs.pop('comm')
 
         # Caching configuration
         self.cache_dir = cache_dir
         self.cache_key = cache_key
         self.force_recompute = force_recompute
         self.cache_used = False  # Flag to track if cache was used
-        
-        # Must be specified, will throw a KeyError if not provided
-        # comm is not added as an explicit optional argument since it is already 
-        # a required argument for the Probes class, and we want to avoid redundancy.
-        self.comm = kwargs.pop('comm')
-        
+
+        self.x = x
+        self.y = y 
+        self.z = z
+
+        self.interpolated_fields = NoOverwriteDict()
+
         # Initialize cache manager if caching is enabled
         self.cache = InterpolatorCache(cache_dir) if cache_dir else None
         
         # Check if we're in serial mode (1 rank) - caching is simpler in this case
         self.is_serial = self.comm.Get_size() == 1
         
-        # Try to load from cache if caching is enabled and not forcing recompute
-        # For now, only support caching in serial mode
-        if self.cache and not force_recompute and self.is_serial:
-            # Peek at msh for cache key generation (will be popped later)
-            msh_for_cache = kwargs.get('msh', None)
-            if self._try_load_from_cache(kwargs, msh_for_cache):
-                print("Loading from cache")
-                return  # Cache was successfully loaded, skip normal initialization
         
-        # Normal initialization (no cache or cache load failed)
-        if self.comm.Get_rank() == 0:
+        if not fname:
+        
+            self.is_3D = isinstance(x, np.ndarray) and \
+                        isinstance(y, np.ndarray) and \
+                        isinstance(z, np.ndarray)
 
-            if self.is_3D:
-                xyz = gen_xyz_3d(x, y, z)
-            elif self.is_2D:
-                xyz = gen_xyz_2d(x, y, z)
-            elif self.is_1D:
-                xyz = gen_xyz_1d(x, y, z)
+            x_1d = isinstance(x, float); y_1d = isinstance(y, float); 
+            z_1d = isinstance(z, float)
+            self.is_2D = (
+                x_1d and not y_1d and not z_1d
+                ) or (
+                y_1d and not x_1d and not z_1d
+                ) or (
+                z_1d and not y_1d and not x_1d
+                )
+
+            self.is_1D = not self.is_3D and not self.is_2D
+            
+            self.orig_shape = next((arr.shape for arr in [self.x, self.y, self.z]
+                                        if isinstance(arr, np.ndarray)), None)
+            if not isinstance(self.orig_shape, tuple):
+                raise TypeError("Problem loading shape of x/y/z")
+
+            # Try to load from cache if caching is enabled and not forcing recompute
+            # For now, only support caching in serial mode
+            if self.cache and not force_recompute and self.is_serial:
+                # Peek at msh for cache key generation (will be popped later)
+                msh_for_cache = kwargs.get('msh', None)
+                if self._try_load_from_cache(kwargs, msh_for_cache):
+                    print("Loading from cache")
+                    return  # Cache was successfully loaded, skip normal initialization
+            
+            # Normal initialization (no cache or cache load failed)
+            if self.comm.Get_rank() == 0:
+
+                if self.is_3D:
+                    xyz = gen_xyz_3d(x, y, z)
+                elif self.is_2D:
+                    xyz = gen_xyz_2d(x, y, z)
+                elif self.is_1D:
+                    xyz = gen_xyz_1d(x, y, z)
+                else:
+                    raise ValueError("Problem initializing xyz array for probes")
+
             else:
-                raise ValueError("Problem initializing xyz array for probes")
-
+                xyz = None
         else:
-            xyz = None
+            xyz = fname
 
         msh = kwargs.pop("msh")
         if (isinstance(msh, str)):
@@ -247,17 +253,36 @@ class EnhancedInterpolator:
                 raise ValueError("Mesh cannot be 2D in EnhancedInterpolator. Extrude your mesh before passing it here.")
 
         self.interpolator = Probes(
-            self.comm,
+            comm = self.comm,
             probes = xyz, 
             msh = msh,
             **kwargs
             )
+
+        # If we read from a filename, load the data in the attributes
+        if fname:
+            if self.comm.Get_rank() == 0:
+                self.x = self.interpolator.probes[:,0]
+                self.y = self.interpolator.probes[:,1]
+                self.z = self.interpolator.probes[:,2]
+                self.orig_shape = self.x.shape
+            else:
+                self.x = None
+                self.y = None
+                self.z = None
+                self.orig_shape = None
         
         # Save to cache if caching is enabled (only in serial mode for now)
         if self.cache and self.is_serial and self.comm.Get_rank() == 0:
             self._save_to_cache(kwargs, msh)
 
-    def interpolate_from_field_list(self, t, field_list, field_names, comm, write_data):
+    def interpolate_from_field_list(
+            self,
+            t,
+            field_list, 
+            field_names, 
+            comm, 
+            **kwargs):
 
         """
         Interpolates a list of fields.
@@ -270,8 +295,8 @@ class EnhancedInterpolator:
             t,
             field_list = field_list,
             field_names = field_names,
-            comm = comm, 
-            write_data = write_data)
+            comm = comm,
+            **kwargs)
         
         for i, name in enumerate(field_names, start=1):
             
