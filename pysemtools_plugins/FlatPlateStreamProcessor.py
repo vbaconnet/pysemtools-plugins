@@ -97,8 +97,8 @@ def generate_interpolators(x, y, s, n):
 
 class FlatPlateStreamProcessor(EnhancedStreamer):
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, comm, fields, adios2_timeout=300, **kwargs):
+        super().__init__(comm, fields, adios2_timeout, **kwargs)
 
     def finalize(self):
         super().finalize()
@@ -157,7 +157,11 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             Nx=1000,
             Ly = 0.1,
             Ny = 1000,
-            g = 2):
+            g = 2.0,
+            interpolator_name = "plate",
+            x_distribution = "uniform",
+            g_s: int = 4,
+            **kwargs):
         """
         Generate an interpolator object with points normal to the blade.
 
@@ -189,7 +193,12 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
 
         smin = self.i_s(xmin)
         smax = self.i_s(xmax)
-        s = np.linspace(smin, smax, Nx)
+        if x_distribution == "uniform":
+            s = np.linspace(smin, smax, Nx)
+        else:
+            s_bbox = [smax, smin]  # yes it is reverted, because we're doing a half tanh
+            s = generate_1d_arrays(s_bbox, Nx, mode="half_tanh", gain=g_s)
+            s = np.flip(s)  # flip the distribution
 
         x_plate = self.i_x(s)
         y_plate = self.i_y(s)
@@ -222,17 +231,12 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             x_pts[i,:], y_pts[i,:] = gen_line_from_normal([nx_tgt, ny_tgt], Ny, 
                                                 x_plate[i], y_plate[i], Ly, g)
 
-        probes = EnhancedInterpolator(
+        self.add_interpolator_from_values(
+            name = interpolator_name,
             x = x_pts, 
             y = y_pts,
             z = 0.0,
             comm = self.comm, 
-            msh = self.msh, 
-            point_interpolator_type='multiple_point_legendre_numpy',
-            max_pts=256, 
-            find_points_comm_pattern='point_to_point',
-            write_coords=False
-            )
-
-
-        return probes
+            msh = self.msh,
+            **kwargs
+        )
