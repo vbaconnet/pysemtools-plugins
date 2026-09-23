@@ -1,104 +1,35 @@
+from multiprocessing import Value
+
 from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 import numpy as np
 from pysemtools.interpolation.pointclouds import generate_1d_arrays
-
-def compute_normal_tangent(xa,xb,ya,yb):
-    """
-    Compute the normal and tangent vector from two points A and B.
-
-    Returns
-    -------
-    n : np.ndarray
-        normal vector.
-    t : np.ndarray
-        tangent vector.
-
-    """
-    
-    dx = xb-xa
-    dy = yb-ya
-    t = np.array([dx, dy])/np.sqrt(dx**2 + dy**2)
-    n = np.array([-dy, dx])/np.sqrt(dx**2 + dy**2)
-    return n,t
-
-def compute_normals(x, y):
-    """
-    Compute normals along the profile (x,y). Use central differences and one-sided
-    on the boundaries. Works also if the domain is periodic.
-    
-    Returns a numpy array of size (N,2) where each column is the x and y coordinate.
-    """
-
-    assert len(x) == len(y)
-
-    N = len(x)
-    n = np.zeros((N,2))
-    
-    # Interior points
-    for i in range(1, N-1):
-        n[i,:], _ = compute_normal_tangent(x[i-1], x[i+1], y[i-1], y[i+1])
-
-    n[0 ,:], _ = compute_normal_tangent(x[ 0], x[ 1], y[ 0], y[ 1])
-    n[-1,:], _ = compute_normal_tangent(x[-2], x[-1], y[-2], y[-1])
-    
-    return n
-
-def compute_curvilinear_distance(x, y, normalize = False):
-    """
-    Generate an array of curvilinear coordinates.
-
-    Returns
-    -------
-    s : numpy array
-        Curvilinear coordinates.
-
-    """
-    assert len(x) == len(y)
-    s = np.zeros_like(x)
-    
-    dx = np.diff(x)
-    dy = np.diff(y)
-    
-    s = np.cumsum(np.sqrt( dx**2 + dy**2 ))
-    s = np.concatenate([[0.0], s])
-    
-    if normalize:
-        s = s / np.sum(s)
-
-    return s
-
-def generate_interpolators(x, y, s, n):
-    """
-    Generate interpolators based on curvilinear coordinates, for (x,y) coordinates
-    and all the normals along the profile.
-
-    """
-    from scipy import interpolate
-
-    assert len(x) == len(y) == len(s)
-    assert n.shape[1] == 2
-
-    # Generate curvilinear interpolators
-    interp_x = interpolate.interp1d(s, x, kind='cubic')
-    interp_y = interpolate.interp1d(s, y, kind='cubic')
-
-    # Generate interpolators for x and y components of the normals
-    interp_normals_x = interpolate.interp1d(s, n[:,0], kind='cubic')
-    interp_normals_y = interpolate.interp1d(s, n[:,1], kind='cubic')
-
-    # Generate curvilinear interpolator, maps x -> s
-    # i.e. if i give you an x coordinate you give me the corresponding 
-    # curvilinear coordinate s
-    interp_s = interpolate.interp1d(x, s, kind='cubic')
-
-    return interp_x, interp_y, interp_normals_x, interp_normals_y, interp_s
+from pysemtools_plugins.SurfaceDescriptor import SurfaceDescriptor
 
 
 class FlatPlateStreamProcessor(EnhancedStreamer):
 
-    def __init__(self, comm, fields, adios2_timeout=300, **kwargs):
-        super().__init__(comm, fields, adios2_timeout, **kwargs)
+    def __init__(
+            self, 
+            comm, 
+            fields, 
+            adios2_timeout=300,
+            create_catalyst_session: bool = False,
+            catalyst_pipeline: str | None = None,
+            catalyst_channel: str | None = None, **kwargs):
+
+        self.surface: SurfaceDescriptor
+
+        super().__init__(
+            comm, 
+            fields, 
+            adios2_timeout, 
+            create_catalyst_session,
+            catalyst_pipeline,
+            catalyst_channel,
+            **kwargs)
+
+        
 
     def finalize(self):
         super().finalize()
@@ -126,29 +57,71 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             'y': data[:,1]
             }
 
-        # --- Point generation
-        # returns [N,2] array with coordinates of normal vectors
-        self.n = compute_normals(
-            self.plate_coordinates["x"],
-            self.plate_coordinates["y"]
-            )
-
-        # Compute the curvilinear coordinates
-        self.s = compute_curvilinear_distance(
-            self.plate_coordinates["x"],
-            self.plate_coordinates["y"],
-            normalize=False
-            )
-
-        # Now generate the interpolators for plotting BLs
-        # the interpolators are based on curvilinear distance self.s
-        self.i_x, self.i_y, self.i_nx, self.i_ny, self.i_s = generate_interpolators(
-            self.plate_coordinates["x"],
-            self.plate_coordinates["y"],
-            self.s,
-            self.n
+        self.surface = SurfaceDescriptor(
+            data[:,0],
+            data[:,1]
         )
-        # ---
+
+        self.surface.generate_interpolators()
+
+    def generate_points_on_plate(
+            self, 
+            xmin, 
+            xmax, 
+            Nx, 
+            distribution = "uniform",
+            gain: int = 3,
+            interpolator_name: str = "",
+            **kwargs):
+
+        """
+        Generate points on the plate surface.
+
+        Parameters
+        ----------
+        xmin : float
+            Minimum x-coordinate for the plate.
+        xmax : float
+            Maximum x-coordinate for the plate.
+        Nx : int
+            Number of points to generate along the plate.
+        distribution : str, optional
+            Distribution of points along the plate. Options are 'uniform' or 'refine_left' (default is 'uniform').
+        gain : int, optional
+            Gain for the point distribution (default is 3).
+
+        Returns
+        -------
+        tuple
+            A tuple containing the x and y coordinates of the generated points.
+        """
+        smin = self.surface.interpolate_s(xmin)
+        smax = self.surface.interpolate_s(xmax)
+
+        if distribution == "uniform":
+            s = np.linspace(smin, smax, Nx)
+        elif distribution == "refine_left":
+            s_bbox = [smax, smin]  # yes it is reverted, because we're doing a half tanh
+            s = generate_1d_arrays(s_bbox, Nx, mode="half_tanh", gain=gain)
+            s = np.flip(s)  # flip the distribution
+        else:
+            raise ValueError(f"{distribution} distribution not supported (only 'uniform' and 'refine_left')")
+
+        x_plate = self.surface.interpolate_x(s)
+        y_plate = self.surface.interpolate_y(s)
+
+        if interpolator_name:
+            self.add_interpolator_from_values(
+                name = interpolator_name,
+                x = x_plate, 
+                y = y_plate,
+                z = 0.0,
+                comm = self.comm, 
+                msh = self.msh,
+                **kwargs
+            )
+
+        return x_plate, y_plate
 
     def generate_BL_plane(
             self,
@@ -160,7 +133,7 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             g = 2.0,
             interpolator_name = "plate",
             x_distribution = "uniform",
-            g_s: int = 4,
+            g_s: int = 3,
             **kwargs):
         """
         Generate an interpolator object with points normal to the blade.
@@ -187,32 +160,23 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
 
         """
 
-        # Do some checks first
-        for att in ['i_x', 'i_y', 'i_nx', 'i_ny', 'i_s']:
-            self.check_attr(att)
-
-        smin = self.i_s(xmin)
-        smax = self.i_s(xmax)
-        if x_distribution == "uniform":
-            s = np.linspace(smin, smax, Nx)
-        else:
-            s_bbox = [smax, smin]  # yes it is reverted, because we're doing a half tanh
-            s = generate_1d_arrays(s_bbox, Nx, mode="half_tanh", gain=g_s)
-            s = np.flip(s)  # flip the distribution
-
-        x_plate = self.i_x(s)
-        y_plate = self.i_y(s)
+        x_plate, y_plate = self.generate_points_on_plate(
+            xmin,
+            xmax,
+            Nx,
+            x_distribution,
+            g_s
+        )
 
         x_pts = np.zeros((Nx,Ny))
         y_pts = np.zeros_like(x_pts)
 
         for i in range(Nx):
 
-            s_tgt = self.i_s(x_plate[i])
+            s_tgt = self.surface.interpolate_s(x_plate[i])
 
             # Interpolate the other stuff
-            nx_tgt = self.i_nx(s_tgt)
-            ny_tgt = self.i_ny(s_tgt)
+            nx_tgt, ny_tgt = self.surface.interpolate_n(s_tgt)
 
             def gen_line_from_normal(n, Npts, xstart, ystart, L, g):
                 xline = np.zeros(Npts)
@@ -240,3 +204,35 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             msh = self.msh,
             **kwargs
         )
+
+    def compute_bl_chars(self, u, x, y, dudy = None, dudy_limit = 0.001):
+        """
+        Compute boundary layer characteristics:
+        - delta_star, displacement thickness
+        - theta, momentum thickness
+        - H, shape factor
+
+        given a series of boundary layer profiles u[Nx, Ny] along x.
+        """
+        
+        nx = x.shape[0]
+        theta = np.zeros(nx)
+        delta_star = np.zeros(nx)
+        H = np.zeros(nx)
+        for i in range(nx):
+
+            if dudy:
+                yend = np.where(dudy[i,:]/dudy[i,0] < dudy_limit)[0][0]
+            else:
+                yend = -1
+
+            yy = y[i,:yend] - y[i,0]
+            uu = u[i,:yend]/u[i,yend]
+            #print(yy[-1])
+
+            delta_star[i] = np.trapezoid(1-uu, yy)
+            theta[i] = np.trapezoid(uu*(1-uu), yy)
+            H[i] = delta_star[i] / theta[i]
+
+        return delta_star, theta, H
+

@@ -1,15 +1,33 @@
+from venv import create
+
 import adios2.bindings as adios2
 from pysemtools.io.adios2.stream import DataStreamer
 from pysemtools.io.utils import get_fld_from_ndarray
 from pysemtools.datatypes.msh import Mesh
 from pysemtools.datatypes.field import NoOverwriteDict
 from pysemtools.monitoring.logger import Logger
+
+try:
+    from pysemtools_plugins.EnhancedVTKMesh import EnhancedVTKMesh
+    _HAS_EVTKMESH=True
+except ModuleNotFoundError:
+    print("pyvista is not installed. EnhancedVTKMesh capabilities disabled.")
+    _HAS_EVTKMESH=False
+
 from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 import numpy as np
+from pysemtools.io.catalyst import CatalystSession
 
 class EnhancedStreamer:
 
-    def __init__(self, comm, fields: list[str], adios2_timeout: int = 300):
+    def __init__(
+            self, 
+            comm, 
+            fields: list[str], 
+            adios2_timeout: int = 300,
+            create_catalyst_session: bool = False,
+            catalyst_pipeline: str | None = None,
+            catalyst_channel: str | None = None):
         """
         Initialize the EnhancedStreamer.
 
@@ -23,7 +41,7 @@ class EnhancedStreamer:
 
         self.adios2_timeout = adios2_timeout
 
-        self.msh = None
+        self.msh: Mesh | None = None
         self.field_names = fields
         self.fields = NoOverwriteDict()
 
@@ -36,6 +54,18 @@ class EnhancedStreamer:
 
         self.adios2_status = None
 
+        self.vtk_mesh: EnhancedVTKMesh | None = None
+        self.catalyst_session = None
+
+        if create_catalyst_session:
+            if not catalyst_channel and not catalyst_pipeline:
+                raise ValueError("channel and pipeline must be provided if Catalyst is enabled.")
+
+            self.catalyst_session = CatalystSession(
+                self.comm, 
+                catalyst_pipeline,
+                catalyst_channel)
+
     def check_attr(self, name):
         
         if not hasattr(self, name):
@@ -47,8 +77,12 @@ class EnhancedStreamer:
         self.ds.finalize()
         self.log.write("info", "Done!")
 
+        if isinstance(self.catalyst_session, CatalystSession):
+            self.catalyst_session.finalize()
+
     def get_adios2_status(self):
 
+        stream_data = False
         if self.ds.step_status == adios2.StepStatus.OK:
             stream_data = True
         elif self.ds.step_status == adios2.StepStatus.EndOfStream:
@@ -56,7 +90,10 @@ class EnhancedStreamer:
 
         return stream_data
 
-    def receive_mesh(self, dtype: str = "double"):
+    def receive_mesh(
+            self, 
+            dtype: str = "double", 
+            create_vtkmesh: bool = False):
         """
         Receive mesh data from the streamer and initialize the mesh.
 
@@ -91,6 +128,15 @@ class EnhancedStreamer:
         self.msh = Mesh(self.comm, x = x, y = y, z = z)
         self.log.write("info", "Initializing mesh... done")
 
+        if create_vtkmesh and _HAS_EVTKMESH:
+            self.vtk_mesh = EnhancedVTKMesh(self.comm, self.msh)
+
+        if isinstance(self.catalyst_session, CatalystSession):
+            self.catalyst_session.set_mesh(
+                self.msh.x,
+                self.msh.y,
+                self.msh.z)
+
     def receive_fields(self, dtype = "double"):
         if dtype == "single":
             dt = np.float32
@@ -114,6 +160,15 @@ class EnhancedStreamer:
             self.log.write("info", f"Received field {f}.")
             
         self.log.write("info", "Data received")
+
+        if isinstance(self.vtk_mesh, EnhancedVTKMesh):
+            self.log.write("info", "Updating fields in VTKMesh")
+            for f,v in self.fields.items():
+                self.vtk_mesh.point_data(f, v)
+
+        if isinstance(self.catalyst_session, CatalystSession):
+            self.log.write("info", "Updating fields in CatalystSession")
+            self.catalyst_session.set_field(self.fields)
 
     def add_interpolator_from_object(self, i: EnhancedInterpolator,
                                      name: str = ""):
@@ -210,12 +265,12 @@ class EnhancedStreamer:
                     **kwargs
                     )
 
-    def update_interpolators(self, t: float = 0.0):
+    def update_interpolators(self, t: float = 0.0, **kwargs):
         """
         Update interpolators when new data has been received
         """
         for iname in self.interpolators.keys():
-            self.update_interpolator(t, iname)
+            self.update_interpolator(t, iname, **kwargs)
 
     def get_field_from_interpolator(self, field_name, interpolator_name):
         return self.interpolators[interpolator_name].get_field(field_name)
@@ -276,3 +331,25 @@ class EnhancedStreamer:
             z = z,
             **kwargs
         )
+
+    def execute_catalyst_session(self, tstep: int = 0, t: float = 0.0):
+        """
+        Execute the Catalyst session with the given timestep and time.
+
+        Parameters:
+        ----------
+        tstep : int
+            The current timestep.
+        t : float
+            The current time.
+
+        Raises:
+        ------
+        ValueError
+            If the Catalyst session is not initialized.
+        """
+
+        if isinstance(self.catalyst_session, CatalystSession):
+            self.catalyst_session.execute(tstep, t)
+        else:
+            raise ValueError("Catalyst session not initialized!")
