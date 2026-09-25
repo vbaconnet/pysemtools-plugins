@@ -6,6 +6,7 @@ from pysemtools.io.utils import get_fld_from_ndarray
 from pysemtools.datatypes.msh import Mesh
 from pysemtools.datatypes.field import NoOverwriteDict
 from pysemtools.monitoring.logger import Logger
+from pysemtools.io.wrappers import write_data
 
 try:
     from pysemtools_plugins.EnhancedVTKMesh import EnhancedVTKMesh
@@ -151,11 +152,8 @@ class EnhancedStreamer:
                 self.ds.recieve(),
                 self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
                 ).astype(dt) 
-            
-            if f in self.fields:
-                self.fields[f][...] = ftemp #noverwritedict requires this way of overwriting
-            else:
-                self.fields[f] = ftemp
+
+            self.add_field(f, ftemp)
                 
             self.log.write("info", f"Received field {f}.")
             
@@ -169,6 +167,30 @@ class EnhancedStreamer:
         if isinstance(self.catalyst_session, CatalystSession):
             self.log.write("info", "Updating fields in CatalystSession")
             self.catalyst_session.set_field(self.fields)
+
+    def add_field(self, name, value):
+        """
+        Add a field to the StreamProcessor or replace an existing one.
+
+        :param name: Name of the field to add or replace.
+        :param value: Value of the field to add or replace.
+        """
+        if name in self.fields:
+            self.log.write("info", f"Replacing field {name}")
+            self.fields[name][...] = value
+        else:
+            self.log.write("info", f"Adding new field {name}")
+            self.fields[name] = value
+
+    def dump_fields(self, fname: str):
+        """
+        Dump the fields to a file.
+
+        :param fname: Name of the file to write the fields to.
+        """
+        if self.msh:
+            write_data(self.comm, fname, self.fields, parallel_io=True,
+                    msh = [self.msh.x, self.msh.y, self.msh.z], write_mesh=True)
 
     def add_interpolator_from_object(self, i: EnhancedInterpolator,
                                      name: str = ""):
