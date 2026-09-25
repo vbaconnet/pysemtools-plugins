@@ -5,10 +5,6 @@ import os
 import argparse
 
 from pysemtools_plugins import FlatPlateStreamProcessor
-import sys
-# Remove VisIt's conflicting VTK paths
-sys.path = [p for p in sys.path if 'visit' not in p.lower()]
-import pyvista as pv
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -42,17 +38,19 @@ import matplotlib.colors as colors
 from matplotlib.tri import Triangulation
 
 # external
-import adios2.bindings as adios2
+# import adios2.bindings as adios2
 
 # my classes
-from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
+# from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 from pysemtools_plugins.FlatPlateStreamProcessor import FlatPlateStreamProcessor
+#from pysemtools_plugins.EnhancedVTKMesh import EnhancedVTKMesh
+# from pysemtools.io.catalyst import CatalystSession
 
 # pysemtools
-from pysemtools.io.adios2.stream import DataStreamer
-from pysemtools.io.utils import get_fld_from_ndarray
-from pysemtools.datatypes.msh import Mesh
-from pysemtools.interpolation.probes import Probes
+# from pysemtools.io.adios2.stream import DataStreamer
+# from pysemtools.io.utils import get_fld_from_ndarray
+# from pysemtools.datatypes.msh import Mesh
+# from pysemtools.interpolation.probes import Probes
 from pysemtools.monitoring.logger import Logger
 log = Logger(comm=comm, module_name="cylinder_insitu_task")
 
@@ -80,8 +78,8 @@ def get_field_names(fname):
 def init_plot(save_output_path):
     fig, axs = plt.subplots(nrows = 2, figsize = (15,12), sharex = False)
 
-    axs[0].set_xlabel("t")
-    axs[0].set_ylabel("u")
+    axs[0].set_xlabel("u")
+    axs[0].set_ylabel("y")
     axs[0].set_aspect('auto')
     axs[1].set_xlabel("x [m]")
     axs[1].set_ylabel("tau_x")
@@ -136,7 +134,10 @@ streamer_field_names = get_field_names("cylinder_insitu.case")
 processor = FlatPlateStreamProcessor(
     comm,
     fields = streamer_field_names,
-    adios2_timeout = args.timeout
+    adios2_timeout = args.timeout,
+    create_catalyst_session = True,
+    catalyst_pipeline="pipeline_new.py",
+    catalyst_channel="field.nek5000"
     )
 
 processor.read_plate_coordinates("/scratch/baconnet/simulations/neko/hpc_workflows/flatplate/meshes/geometry/unique_wall_coords_2D.csv")
@@ -151,23 +152,28 @@ processor.receive_mesh(dtype_string)
 # Initialize the structured probes data
 #=========================================
 
+processor.generate_points_on_plate(
+    xmin = 0.02,
+    xmax = 0.5,
+    Nx = 500,
+    distribution = "uniform",
+    interpolator_name = "plate",
+    output_fname = f'{output_path}/plate.hdf5'
+)
+
 processor.generate_BL_plane(
-    xmin = 0.0,
-    xmax = 0.1,
-    Nx = 50,
+    xmin = 0.02,
+    xmax = 0.5,
+    Nx = 4,
     Ly = 0.01,
     Ny = 100,
-    x_distribution="non_uniform",
-    interpolator_name = "plate",
+    x_distribution="uniform",
+    interpolator_name = "BLs",
     write_coords = False,
-    output_fname = f"{output_path}/plate.hdf5"
+    output_fname = f"{output_path}/BLs.hdf5"
 )
-X = processor.interpolators["plate"].x
-Y = processor.interpolators["plate"].y
-
-tri = Triangulation(X.flatten(), Y.flatten())
-
-x_plate = X[:,0]
+X = processor.interpolators["BLs"].x
+Y = processor.interpolators["BLs"].y
 
 # --------------------------------------------
 # Read from csv
@@ -191,10 +197,14 @@ if comm.Get_rank() == 0:
     axs[0].plot(X.T, Y.T, "k-")
     fname = join(output_path, f"plate_insitu_00000.png")
     fig.savefig(fname, dpi = 200)
-    axs[0].clear()
 
-    grid = pv.StructuredGrid(X, Y, np.zeros_like(Y))     # 2D lattice, z padded with zeros
-    pl = pv.Plotter(window_size=(900, 300), off_screen = True)
+    axs[0].clear()
+    
+    # axs[0].plot(
+    #     processor.plate_coordinates["x"],
+    #     processor.plate_coordinates["y"],
+    #     "k-"
+    #     )
 
 #=========================================
 # Start streaming data
@@ -209,13 +219,14 @@ while True:
     if not processor.get_adios2_status():
         break
 
-    processor.update_interpolator(j, "plate", write_data=False)
-    processor.update_interpolator(j, "probes", streamer_field_names[:1], write_data=False)
+    processor.update_interpolators(j, write_data=False)
+
+    processor.execute_catalyst_session(j, j*0.1)
 
     if comm.Get_rank() == 0:
 
-        u_plate = processor.get_field_from_interpolator(
-            streamer_field_names[0], "plate")
+        u_BLs = processor.get_field_from_interpolator(
+            streamer_field_names[0], "BLs")
         
         tau_plate = processor.get_field_from_interpolator(
             streamer_field_names[1], "plate")
@@ -224,53 +235,42 @@ while True:
             streamer_field_names[0], "probes"
         )
 
-        # Plot the slice with pyvista
-
-        if j == 0:
-            grid.point_data['u'] = u_plate.ravel(order='F')
-            pl.add_mesh(grid,
-                        scalars='u',
-                        cmap='viridis',
-                        clim=[-1, 1],
-                        show_scalar_bar=True,
-                        scalar_bar_args={'title': 'u'})
-            
-            pl.view_xy()                    # orthographic top-down camera -> "2D slice" look
-            pl.camera.zoom(1.0)
-            pl.set_background('white')
-            pl.screenshot('u_slice.png', scale=2)
-            pl.camera.zoom(3.0)
-        else:
-            grid.point_data['u'] = u_plate.ravel(order='F')
-            pl.render()
-
-        fname = join(output_path, f"u_slice_{j:05d}.png")
-        pl.screenshot(fname, scale=2)
-
         fig.suptitle(f"time step {j}")
         log.write("info", "Plotting fields")
 
-        if j == 0:
-            line0, = axs[0].plot([], [], "r-", label="probe 0")
-            line1, = axs[0].plot([], [], "g-", label="probe 1")
-            line2, = axs[0].plot([], [], "b-", label="probe 2")
-            axs[0].legend()
-        else:
-            # Append to each line's data
-            x = np.append(line0.get_xdata(), j)
-            line0.set_data(x, np.append(line0.get_ydata(), u_pbs[0]))
-            line1.set_data(x, np.append(line1.get_ydata(), u_pbs[1]))
-            line2.set_data(x, np.append(line2.get_ydata(), u_pbs[2]))
+        axs[0].clear()
+        for bl_i in range(u_BLs.shape[0]):
+            axs[0].plot(
+                u_BLs[bl_i,:],
+                processor.interpolators["BLs"].y[bl_i,:]
+            )
 
-            # Auto-rescale the view
-            axs[0].relim()
-            axs[0].autoscale_view()
+        # if j == 0:
+        #     line0, = axs[0].plot([], [], "r-", label="probe 0")
+        #     line1, = axs[0].plot([], [], "g-", label="probe 1")
+        #     line2, = axs[0].plot([], [], "b-", label="probe 2")
+        #     axs[0].legend()
+        # else:
+        #     # Append to each line's data
+        #     x = np.append(line0.get_xdata(), j)
+        #     line0.set_data(x, np.append(line0.get_ydata(), u_pbs[0]))
+        #     line1.set_data(x, np.append(line1.get_ydata(), u_pbs[1]))
+        #     line2.set_data(x, np.append(line2.get_ydata(), u_pbs[2]))
+
+        #     # Auto-rescale the view
+        #     axs[0].relim()
+        #     axs[0].autoscale_view()
 
         axs[1].clear()
-        axs[1].plot(x_plate, tau_plate[:,0])
+        axs[1].plot(
+            processor.interpolators["plate"].x, 
+            tau_plate
+            )
+        
         if j == 0: 
             fig.tight_layout()
 
+        j = 0
         fname = join(output_path, f"plate_insitu_{j:05d}.png")
         subprocess.run(["ln", "-fs", fname, "current.png"])
         #fname = join(output_path, "cylinder_insitu_00000.png")

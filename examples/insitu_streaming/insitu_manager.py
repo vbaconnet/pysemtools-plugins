@@ -36,17 +36,10 @@ from os.path import join
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 
-# external
-import adios2.bindings as adios2
-
 # my classes
 from pysemtools_plugins.EnhancedStreamer import EnhancedStreamer
 
 # pysemtools
-from pysemtools.io.adios2.stream import DataStreamer
-from pysemtools.io.utils import get_fld_from_ndarray
-from pysemtools.datatypes.msh import Mesh
-from pysemtools.interpolation.probes import Probes
 from pysemtools.monitoring.logger import Logger
 log = Logger(comm=comm, module_name="cylinder_insitu_task")
 
@@ -112,8 +105,7 @@ if args.dry_run:
 
 # Remove globalArray_* files
 import subprocess
-subprocess.run(["rm", "-f", "globalArray*"])
-sleep(1.0)
+subprocess.run("rm -f globalArray*", shell=True)
 
 #=========================================
 # Define some variables/parameters
@@ -140,76 +132,16 @@ streamer_field_names = get_field_names("cylinder_insitu.case")
 processor = EnhancedStreamer(
     comm,
     fields = streamer_field_names,
-    adios2_timeout = args.timeout
+    adios2_timeout = args.timeout,
+    create_catalyst_session=True,
+    catalyst_pipeline="pipeline_lambda2.py",
+    catalyst_channel="field.vtkhdf"
     )
 
 #=========================================
 # Stream the mesh coordinates to build interpolators
 #=========================================
-
 processor.receive_mesh(dtype_string)
-
-#=========================================
-# Initialize the structured probes data
-#=========================================
-
-# Generate a 30x30 grid in the x-y plane at a given z.
-N = 30
-# xbounds = [0.6, 4.0]
-# ybounds = [-1.0, 1.0]
-# z = 2.0
-# x = np.linspace(xbounds[0], xbounds[1], N)
-# y = np.linspace(ybounds[0], ybounds[1], N)
-# X, Y = np.meshgrid(x,y)
-# del x,y
-
-# processor.add_interpolator_from_values(
-#     name = "plane",
-#     x = X,
-#     y = Y,
-#     fill_extrude_value = 2.0,
-#     write_coords = False
-#     )
-
-processor.add_2d_grid_interpolation(
-    name = "plane",
-    x_bounds=[0.6, 4.0],
-    y_bounds=[-1.0, 1.0],
-    z_bounds = 2.0,
-    Nx = N, 
-    Ny = N, 
-    write_coords = False)
-
-X = processor.interpolators["plane"].x
-Y = processor.interpolators["plane"].y
-
-# Generate a line with 100 points along the circle of center (0,0) and radius
-# R = 0.5
-theta = np.linspace(0.0, np.pi, 100)
-processor.add_interpolator_from_values(
-    name = "circle",
-    x = np.cos(theta + np.pi) * 0.5,
-    y = np.sin(theta + np.pi) * 0.5,
-    z = 2.0,
-    write_coords = False
-    )
-
-# --------------------------------------------
-# Read from csv
-processor.add_interpolator_from_values(
-    name = "probes",
-    fname = "probes.csv",
-    x = 0.0,
-    y = 0.0,
-    z = 0.0
-)
-
-#=========================================
-# Initialize plots
-#=========================================
-
-if comm.Get_rank() == 0:
-    fig, axs = init_plot(output_path)
 
 #=========================================
 # Start streaming data
@@ -220,61 +152,17 @@ while True:
 
     processor.receive_fields(dtype_string)
 
+    mag = np.sqrt(processor.fields["u"]**2 + \
+                  processor.fields["v"]**2 + \
+                    processor.fields["w"]**2)
+
+    processor.add_field("mag", mag)
+
     # Check if data was recieved or if the stream ended
     if not processor.get_adios2_status():
         break
 
-    processor.update_interpolators(j)
-
-    if comm.Get_rank() == 0:
-
-        u_probe = processor.get_field_from_interpolator(
-            streamer_field_names[0], "plane")
-        curl_probe = processor.get_field_from_interpolator(
-            streamer_field_names[1], "plane")
-        
-        pressure_probe = processor.get_field_from_interpolator(
-            streamer_field_names[2], "circle")
-
-        u_pbs = processor.get_field_from_interpolator(
-            streamer_field_names[0], "probes"
-        )
-
-        print(u_pbs.shape, u_probe.shape)
-
-        fig.suptitle(f"time step {j}")
-        log.write("info", "Plotting fields")
-        #axs[0].cla()
-        axs[0].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, u_probe, levels = 40, norm=colors.Normalize(vmin=-0.4, vmax=1.4))
-        #axs[1].cla()
-        #axs[1].contourf(processor.interpolators["plane"].x, processor.interpolators["plane"].y, curl_probe, levels = 40, cmap = "bwr", norm=colors.Normalize(vmin=-4.0, vmax=4.0))
-        
-        if j == 0:
-            line0, = axs[1].plot([], [], "r-", label="probe 0")
-            line1, = axs[1].plot([], [], "g-", label="probe 1")
-            line2, = axs[1].plot([], [], "b-", label="probe 2")
-            axs[1].legend()
-        else:
-            # Append to each line's data
-            x = np.append(line0.get_xdata(), j)
-            line0.set_data(x, np.append(line0.get_ydata(), u_pbs[0]))
-            line1.set_data(x, np.append(line1.get_ydata(), u_pbs[1]))
-            line2.set_data(x, np.append(line2.get_ydata(), u_pbs[2]))
-
-            # Auto-rescale the view
-            axs[1].relim()
-            axs[1].autoscale_view()
-
-        axs[2].clear()
-        axs[2].plot(theta * 180 / np.pi, pressure_probe)
-        if j == 0: 
-            fig.tight_layout()
-
-        fname = join(output_path, f"cylinder_insitu_{j:05d}.png")
-        subprocess.run(["ln", "-fs", fname, "current.png"])
-        #fname = join(output_path, "cylinder_insitu_00000.png")
-        log.write("info", f"Saving snapshot to {fname}")
-        fig.savefig(fname, dpi = 200)
+    processor.execute_catalyst_session(j, 0.1*j)
 
     j += 1
 
