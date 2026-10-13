@@ -37,6 +37,9 @@ class EnhancedStreamer:
         :param adios2_timeout: Timeout in seconds for ADIOS2 operations (default: 300)
         """
 
+        self.time = 0.0
+        self.tstep = 0
+
         self.comm = comm
         self.log = Logger(comm=comm, module_name="EnhancedStreamer")
 
@@ -111,18 +114,15 @@ class EnhancedStreamer:
         x = get_fld_from_ndarray(
             self.ds.recieve(),
             self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
-            ).astype(dt)
-
+            )
         y = get_fld_from_ndarray(
             self.ds.recieve(),
             self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
-            ).astype(dt)
-
+            )
         z = get_fld_from_ndarray(
             self.ds.recieve(),
             self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
-            ).astype(dt)
-
+            )
         self.log.write("info", "Data received")
 
         self.log.write("info", "Initializing mesh...")
@@ -138,12 +138,13 @@ class EnhancedStreamer:
                 self.msh.y,
                 self.msh.z)
 
-    def receive_fields(self, dtype = "double"):
-        if dtype == "single":
-            dt = np.float32
-        else:
-            dt = np.float64
+    def receive_fields(self):
+
         self.log.write("info", "Waiting for data from Neko...")
+
+        self.time, self.tstep = self.ds.receive_time_variables()
+        self.log.write("info", f"Received time: {self.time}, timestep: {self.tstep}")
+
         # Get the data, assuming that the order in which the files are 
         # specified in the init are those received from Neko
         for f in self.field_names:
@@ -151,7 +152,7 @@ class EnhancedStreamer:
             ftemp = get_fld_from_ndarray(
                 self.ds.recieve(),
                 self.ds.lx, self.ds.ly, self.ds.lz, self.ds.nelv
-                ).astype(dt) 
+                )
 
             self.add_field(f, ftemp)
                 
@@ -354,7 +355,7 @@ class EnhancedStreamer:
             **kwargs
         )
 
-    def execute_catalyst_session(self, tstep: int = 0, t: float = 0.0):
+    def execute_catalyst_session(self, tstep: int | None = None, t: float | None = None):
         """
         Execute the Catalyst session with the given timestep and time.
 
@@ -371,7 +372,17 @@ class EnhancedStreamer:
             If the Catalyst session is not initialized.
         """
 
+        if not t:
+            t_ = self.time
+        else:
+            t_ = t
+        
+        if not tstep:
+            tstep_ = self.tstep
+        else:
+            tstep_ = tstep
+
         if isinstance(self.catalyst_session, CatalystSession):
-            self.catalyst_session.execute(tstep, t)
+            self.catalyst_session.execute(tstep_, t_)
         else:
             raise ValueError("Catalyst session not initialized!")

@@ -150,14 +150,12 @@ class EnhancedInterpolator:
 
         Parameters:
         ----------
-        x : numpy.ndarray
+        x : numpy.ndarray | float
             The x-coordinates of the points.
-        y : numpy.ndarray
+        y : numpy.ndarray | float
             The y-coordinates of the points.
-        z : numpy.ndarray, optional
-            The z-coordinates of the points. If not provided, fill_extrude_value must be provided.
-        fill_extrude_value : float, optional
-            The value to use for z-coordinates if z is not provided.
+        z : numpy.ndarray | float, optional
+            The z-coordinates of the points. 
         cache_dir : str, optional
             Directory to store/load cache files. If None, caching is disabled.
             Currently, caching is only supported in serial mode (1 MPI rank).

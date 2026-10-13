@@ -15,6 +15,32 @@ import numpy as np
 from pysemtools.monitoring.logger import Logger
 
 class EnhancedVTKMesh:
+    """
+    A class to enhance VTKMesh functionality with additional features and utilities.
+
+    The constructor takes a mesh in any of three forms and normalizes it to a
+    distributed VTKMesh before converting it into a pyvista UnstructuredGrid:
+    a file path is read with pynekread into a Mesh and wrapped, a Mesh object is
+    wrapped directly, and an existing VTKMesh is used as is. In all cases the
+    VTKMesh is created (or assumed to be) with global_connectivity=False and
+    distributed_axis=0.
+
+    Once self.mesh holds the VTKMesh, its connectivity is repacked into the VTK
+    legacy format expected by pyvista: for each cell, the number of vertices
+    is written first, followed by the vertex indices of that cell taken from
+    the flat Connectivity array between Offsets[i] and Offsets[i+1]. The
+    resulting flat index array, together with the per-cell Types (VTK cell
+    types) and the Points vertex coordinates, is passed to
+    pv.UnstructuredGrid to build self.grid.
+
+    Attributes:
+        comm: The communication object.
+        mesh: The VTKMesh object created (or accepted) from the input, which
+            can be a file path, Mesh object, or VTKMesh object.
+        field_names: A list to store field names.
+        log: Logger object for logging messages.
+        grid: The UnstructuredGrid object created from the mesh data.
+    """
     def __init__(self, comm, mesh: str | Mesh | VTKMesh):
         self.comm = comm
         self.mesh: VTKMesh
