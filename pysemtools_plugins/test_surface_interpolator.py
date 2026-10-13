@@ -50,7 +50,6 @@ assert si.x.shape == (N, Nz) and si.y.shape == (N, Nz) and si.z.shape == (N, Nz)
 assert np.allclose(si.x[:,0], surface.interpolate_x(s)), "x mapping broken"
 assert np.allclose(si.y[:,0], surface.interpolate_y(s)), "y mapping broken"
 assert np.allclose(si.z[0,:], z), "z mapping broken"
-assert np.allclose(si.z_line, z), "z line broken"
 
 if rank == 0:
     print("coordinate mapping OK, probe grid:", si.x.shape)

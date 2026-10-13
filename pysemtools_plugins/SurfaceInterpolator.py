@@ -61,11 +61,11 @@ class SurfaceInterpolator(EnhancedInterpolator):
         )
 
         # Bookkeeping in curvilinear coordinates.
-        # Note that self.z (and self.x, self.y) remain the (N, Nz) probe
-        # arrays set by the parent; z_line is the 1D extrusion input.
+        # Note that self.x, self.y, self.z are the (N, Nz) probe arrays
+        # set by the parent; the 1D extrusion input z is recoverable
+        # from them as self.z[0,:].
         self.surface = surface
         self.s = s
-        self.z_line = z
 
     def get_field(self, key, average_z: bool = False):
         """
