@@ -29,8 +29,6 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             catalyst_channel,
             **kwargs)
 
-        
-
     def finalize(self):
         super().finalize()
     
@@ -122,6 +120,71 @@ class FlatPlateStreamProcessor(EnhancedStreamer):
             )
 
         return x_plate, y_plate
+
+    def generate_extruded_plate_points(
+            self,
+            xmin,
+            xmax,
+            Nx,
+            zmin,
+            zmax,
+            Nz,
+            distribution = "uniform",
+            gain: int = 3,
+            interpolator_name: str = "",
+            **kwargs):
+
+        """
+        Generate points on the plate surface extruded uniformly in z.
+
+        Parameters
+        ----------
+        xmin : float
+            Minimum x-coordinate for the plate.
+        xmax : float
+            Maximum x-coordinate for the plate.
+        Nx : int
+            Number of points to generate along the plate.
+        zmin : float
+            Minimum z-coordinate of the extrusion.
+        zmax : float
+            Maximum z-coordinate of the extrusion.
+        Nz : int
+            Number of points to generate along the extrusion.
+        distribution : str, optional
+            Distribution of points along the plate. Options are 'uniform' or 'refine_left' (default is 'uniform').
+        gain : int, optional
+            Gain for the point distribution (default is 3).
+
+        Returns
+        -------
+        tuple
+            A tuple containing the x, y and z coordinates of the generated points, each of shape (Nx, Nz).
+        """
+        x_plate, y_plate = self.generate_points_on_plate(
+            xmin,
+            xmax,
+            Nx,
+            distribution,
+            gain
+        )
+
+        z_pts = np.linspace(zmin, zmax, Nz)
+        x_pts, z_pts = np.meshgrid(x_plate, z_pts, indexing = "ij")
+        y_pts, _ = np.meshgrid(y_plate, z_pts, indexing = "ij")
+
+        if interpolator_name:
+            self.add_interpolator_from_values(
+                name = interpolator_name,
+                x = x_pts,
+                y = y_pts,
+                z = z_pts,
+                comm = self.comm,
+                msh = self.msh,
+                **kwargs
+            )
+
+        return x_pts, y_pts, z_pts
 
     def generate_BL_plane(
             self,
