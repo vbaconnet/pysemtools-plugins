@@ -3,19 +3,20 @@ import numpy as np
 from pysemtools_plugins.EnhancedInterpolator import EnhancedInterpolator
 
 
-class SurfaceInterpolator:
+class SurfaceInterpolator(EnhancedInterpolator):
     """
     Facilitated interpolator on a surface extruded uniformly in z.
 
     The user only interacts with curvilinear coordinates: an index pair
     (i, j) refers to the point at curvilinear coordinate s[i] on the
-    surface and extrusion height z[j]. Inside the object, the s
-    coordinates are mapped to physical (x, y) coordinates through the
-    SurfaceDescriptor interpolators and handed to an EnhancedInterpolator.
-    Interpolated fields are returned as arrays of shape (N, Nz), where
-    the first axis is the curvilinear direction and the second axis the
-    extrusion direction. Spanwise (z) averaged fields of shape (N,) can
-    be obtained on the fly through get_field(key, average_z=True).
+    surface and extrusion height z[j]. The s coordinates are mapped to
+    physical (x, y) coordinates through the SurfaceDescriptor
+    interpolators and the resulting extruded point cloud is handed to
+    the EnhancedInterpolator constructor. Interpolated fields are
+    returned as arrays of shape (N, Nz), where the first axis is the
+    curvilinear direction and the second axis the extrusion direction.
+    Spanwise (z) averaged fields of shape (N,) can be obtained on the
+    fly through get_field(key, average_z=True).
 
     Parameters
     ----------
@@ -43,56 +44,28 @@ class SurfaceInterpolator:
         s = np.atleast_1d(np.asarray(s))
         z = np.atleast_1d(np.asarray(z))
 
-        self.surface = surface
-        self.s = s
-        self.z = z
-
         # Map the curvilinear coordinates to physical coordinates on the surface
         x_line = surface.interpolate_x(s)
         y_line = surface.interpolate_y(s)
 
-        # Extrude the profile uniformly in z
-        self.x, self.z_pts = np.meshgrid(x_line, z, indexing = "ij")
-        self.y, _ = np.meshgrid(y_line, z, indexing = "ij")
+        # Extrude the profile uniformly in z.
+        # Note that the arrays are of shape (N,Nz) here
+        x, z_pts = np.meshgrid(x_line, z, indexing = "ij")
+        y, _ = np.meshgrid(y_line, z, indexing = "ij")
 
-        # note that arrays are of shape (N,Nz) here
-        self.interpolator = EnhancedInterpolator(
-            x = self.x,
-            y = self.y,
-            z = self.z_pts,
+        super().__init__(
+            x = x,
+            y = y,
+            z = z_pts,
             **kwargs
         )
 
-    def interpolate_from_field_list(self, t, field_list, field_names, comm, **kwargs):
-        """
-        Interpolate a list of fields on the extruded surface.
-
-        The interpolated fields are stored as arrays of shape (N, Nz),
-        with the first axis along the curvilinear coordinate s and the
-        second axis along the extrusion z.
-
-        Parameters
-        ----------
-        t : float
-            Time value for the interpolation.
-        field_list : list
-            List of fields to interpolate.
-        field_names : list[str]
-            Names of the fields to use for interpolation.
-        comm : MPI communicator
-            Communicator to use for the interpolation.
-        """
-
-        self.interpolator.interpolate_from_field_list(
-            t,
-            field_list = field_list,
-            field_names = field_names,
-            comm = comm,
-            **kwargs
-        )
-
-    def add_field(self, key, array):
-        self.interpolator.add_field(key, array)
+        # Bookkeeping in curvilinear coordinates.
+        # Note that self.z (and self.x, self.y) remain the (N, Nz) probe
+        # arrays set by the parent; z_line is the 1D extrusion input.
+        self.surface = surface
+        self.s = s
+        self.z_line = z
 
     def get_field(self, key, average_z: bool = False):
         """
@@ -103,7 +76,7 @@ class SurfaceInterpolator:
         returned. Otherwise the full array of shape (N, Nz) is
         returned. Raises a KeyError if the field does not exist.
         """
-        field = self.interpolator.get_field(key)
+        field = super().get_field(key)
 
         if average_z and field.ndim > 1:
             field = field.mean(axis = 1)
